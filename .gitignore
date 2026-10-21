@@ -1,0 +1,9 @@
+build/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+*.mobileprovision
+*.p12
+*.ipa
+!dist/PromptLab-UNSIGNED.ipa
+evidence/*device*.json

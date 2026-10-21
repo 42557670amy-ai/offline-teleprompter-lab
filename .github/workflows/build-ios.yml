@@ -1,0 +1,59 @@
+name: Build unsigned iOS diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'App/**'
+      - 'Info.plist'
+      - 'PromptLab.xcodeproj/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/build-ios.yml'
+permissions:
+  contents: read
+jobs:
+  compile:
+    # Standard PUBLIC-repository runner only; avoids use of private paid minutes.
+    if: github.event.repository.private == false
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Record environment
+        run: |
+          mkdir -p build
+          xcodebuild -version | tee build/toolchain.txt
+          sw_vers >> build/toolchain.txt
+          git rev-parse HEAD >> build/toolchain.txt
+      - name: Verify text matcher and Apple JavaScriptCore
+        run: |
+          node tests/matcher.test.cjs
+          swift scripts/check-jsc.swift App/matcher.js | tee build/jsc-results.txt
+      - name: Build for iPhone without signing credentials
+        run: |
+          set -o pipefail
+          xcodebuild -project PromptLab.xcodeproj -scheme PromptLab \
+            -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO build | tee build/xcodebuild.log
+      - name: Package UNSIGNED artifact
+        run: |
+          mkdir -p build/package/Payload
+          cp -R build/DerivedData/Build/Products/Debug-iphoneos/PromptLab.app build/package/Payload/
+          cd build/package
+          /usr/bin/zip -qr ../PromptLab-UNSIGNED.ipa Payload
+          cd ../..
+          shasum -a 256 build/PromptLab-UNSIGNED.ipa > build/sha256.txt
+          echo 'Unsigned diagnostic build. Requires personal signing; not yet device-tested.' > build/STATUS.txt
+      - name: Keep small artifacts for one day
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: PromptLab-UNSIGNED-and-logs
+          retention-days: 1
+          path: |
+            build/PromptLab-UNSIGNED.ipa
+            build/*.txt
+            build/*.log
+            evidence/matcher-results.json
